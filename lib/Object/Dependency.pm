@@ -273,8 +273,10 @@ objects entirely.
 
 We do not currently check for cycles so please be careful!  
 
-Although often used with L<Proc::JobQueue>, it does not have to
-be paired with L<Proc::JobQueue>.
+Items are expected to be objects, but do not have to be.   Objects
+are identified by their refadd() so if you combine objects and
+other scalers, there is some chance of a collision between large
+intetgers and the refaddr().  The C<undef> value will cause warnings.
 
 =head1 CONSTRUCTION
 
