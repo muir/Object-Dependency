@@ -1,0 +1,6 @@
+
+Version 0.31 - 2010/07/23
+
+Object::Dependency split off from Proc::JobQueue.
+Allow non-objects (but not undef).
+
