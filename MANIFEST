@@ -1,6 +1,6 @@
 lib/Object/Dependency.pm
 Makefile.PL
 MANIFEST			This list of files
-t/dependencies.t
+t/dependency.t
 META.yml                                 Module meta-data (added by MakeMaker)
 CHANGELOG
