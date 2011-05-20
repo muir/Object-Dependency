@@ -289,7 +289,9 @@ Construction is easy: no parameters are expected.
 =item add($object, @depends_upon_objects)
 
 Adds an item (C<$object>) to the dependency graph and notes which items
-it depends upon.  
+it depends upon.  The same object may be added multiple times so if you
+want to declare what object depends upon an object, just use C<add>
+in reverse multiple times.
 
 =item remove_all_dependencies(@objects)
 
