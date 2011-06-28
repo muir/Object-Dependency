@@ -10,7 +10,7 @@ use List::MoreUtils qw(uniq);
 
 my $debug = 0;
 
-our $VERSION = 0.31;
+our $VERSION = 0.32;
 
 sub new
 {
@@ -110,6 +110,13 @@ sub remove_all_dependencies
 	$self->remove_dependency(grep { $self->{addrmap}{refaddr($_) || $_} } uniq @remove);
 }
 
+sub is_dependency
+{
+	my ($self, $item) = @_;
+	my $addr = refaddr($item) || $item;
+	return defined $self->{addrmap}{$addr};
+}
+
 sub remove_dependency
 {
 	my ($self, @items) = @_;
@@ -183,17 +190,14 @@ sub desc
 {
 	my ($self, $addr, $desc) = @_;
 	my $o;
-#print "ADDR: $addr\n";
 	if (ref($addr)) {
 		$o = $addr;
 		$addr = refaddr($addr) || $addr;
 	} else {
 		$o = $self->{addrmap}{$addr};
 	}
-#print "O: $o\n";
 	return "NO SUCH OBJECT $addr" unless $o;
 	my $node = $o->{dg_item};
-#print "NODE: $node\n";
 	$o->{dg_desc} = $desc
 		if defined $desc;
 	$desc = '';
@@ -293,6 +297,9 @@ it depends upon.  The same object may be added multiple times so if you
 want to declare what object depends upon an object, just use C<add>
 in reverse multiple times.
 
+The @depends_upon_objects are the prerequisites for $object.  $object
+is blocked by its @depends_upon_objects.
+
 =item remove_all_dependencies(@objects)
 
 Removes the C<@objects> from the dependency graph.  
@@ -353,6 +360,10 @@ and L<Proc::JobQueue::DependencyTask> objects.
 
 Prints the dependency graph (described objects with the dependencies).
 
+=item is_dependency($object)
+
+Returns true if C<$object> is in the dependency graph.
+
 =back
 
 =head1 SEE ALSO
@@ -361,6 +372,9 @@ L<Proc::JobQueue::DependencyQueue>
 
 =head1 LICENSE
 
+Copyright (C) 2007-2008 SearchMe, Inc.
+Copyright (C) 2009-2010 David Muir Sharnoff
+Copyright (C) 2011 Google, Inc.
 This package may be used and redistributed under the terms of either
 the Artistic 2.0 or LGPL 2.1 license.
 
