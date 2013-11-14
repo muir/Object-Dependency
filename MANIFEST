@@ -4,4 +4,4 @@ MANIFEST			This list of files
 t/dependency.t
 t/stuck.t
 META.yml                                 Module meta-data (added by MakeMaker)
-CHANGELOG
+Changes
