@@ -10,7 +10,7 @@ use List::MoreUtils qw(uniq);
 
 my $debug = 0;
 
-our $VERSION = 0.32;
+our $VERSION = 0.33;
 
 sub new
 {
@@ -174,8 +174,7 @@ sub independent
 	return @ind if @ind;
 	return () if keys %{$self->{independent}};
 	return () unless keys %{$self->{addrmap}};
-	$self->dump_graph();
-	confess "No independent objects, but there are still objects in the dependency graph";
+	confess "No independent objects, but there are still objects in the dependency graph:\n" . $self->dump_graph_string();
 }
 
 sub alldone
@@ -226,22 +225,29 @@ sub desc
 sub dump_graph
 {
 	my ($self) = @_;
+	print $self->dump_graph_string();
+}
 
-	printf "Dependency Graph, alldone=%d\n", $self->alldone;
+sub dump_graph_string
+{
+	my ($self) = @_;
+
+	my $r = sprintf "Dependency Graph, alldone=%d\n", $self->alldone;
 	my %desc;
 	for my $addr (sort keys %{$self->{addrmap}}) {
 		$desc{$addr} = $self->desc($addr);
 	}
 	for my $addr (sort keys %{$self->{addrmap}}) {
-		print "\t$desc{$addr}\n";
+		$r .= "\t$desc{$addr}\n";
 		my $node = $self->{addrmap}{$addr};
 		for my $b (keys %{$node->{dg_blocks}}) {
-			print "\t\tBLOCKS\t$desc{$b}\n";
+			$r .= "\t\tBLOCKS\t$desc{$b}\n";
 		}
 		for my $d (keys %{$node->{dg_depends}}) {
-			print "\t\tDEP_ON\t$desc{$d}\n";
+			$r .= "\t\tDEP_ON\t$desc{$d}\n";
 		}
 	}
+	return $r;
 }
 
 1;
@@ -356,9 +362,9 @@ status: LOCKED, INDEPENDENT, ACTIVE, or STUCK.
 Special handling is done for L<Proc::JobQueue::Job> 
 and L<Proc::JobQueue::DependencyTask> objects.
 
-=item dummp_graph
+=item dump_graph / dump_graph_string
 
-Prints the dependency graph (described objects with the dependencies).
+Prints/returns the dependency graph (described objects with the dependencies).
 
 =item is_dependency($object)
 
@@ -374,7 +380,7 @@ L<Proc::JobQueue::DependencyQueue>
 
 Copyright (C) 2007-2008 SearchMe, Inc.
 Copyright (C) 2009-2010 David Muir Sharnoff
-Copyright (C) 2011 Google, Inc.
+Copyright (C) 2011-2014 Google, Inc.
 This package may be used and redistributed under the terms of either
 the Artistic 2.0 or LGPL 2.1 license.
 
