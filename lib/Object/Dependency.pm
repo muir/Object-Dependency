@@ -252,7 +252,7 @@ __END__
 
 Object::Dependency - maintain a dependency graph
 
-=haad1 SYNOPSIS
+=head1 SYNOPSIS
 
  use Object::Dependency;
 
