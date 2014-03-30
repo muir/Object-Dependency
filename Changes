@@ -5,6 +5,9 @@ Revision history for Perl module Object::Dependency
  - Doc fixes
  - added stuck.t
  - added dump_graph_string
+ - unlock no longer clears active flag
+ - new dependencies no longer clear active flag
+ - rework stuck dependencies code, add tests
 
 0.32 2011/06/28
 

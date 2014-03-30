@@ -7,6 +7,7 @@ use Scalar::Util qw(refaddr blessed);
 use Hash::Util qw(lock_keys);
 use Carp qw(confess);
 use List::MoreUtils qw(uniq);
+use Data::Dumper;   # XXX
 
 my $debug = 0;
 
@@ -16,13 +17,13 @@ sub new
 {
 	my ($pkg, %more) = @_;
 	my $self = {
-		addrmap		=> {},
-		independent	=> {},
-		stuck		=> {},
+		addrmap		=> {},	# maps object id to object for non-stuck objects
+		independent	=> {},  # set of objects that have no dependencies
+		stuck		=> {},  # maps object id to object for stuck objects
 		%more,
 	};
 	bless $self, $pkg;
-	lock_keys(%$self);
+#	lock_keys(%$self);   XXXX
 	return $self;
 }
 
@@ -31,31 +32,31 @@ sub newitem
 	my ($self, $i) = @_;
 	my $addr = refaddr($i) || $i;
 	my %item = (
-		dg_addr		=> $addr,
-		dg_item		=> $i,
-		dg_depends	=> {},
-		dg_blocks	=> {},
-		dg_active	=> 0,
-		dg_lock		=> 0,
-		dg_desc		=> undef,
-		dg_stuck	=> undef,
+		dg_addr		=> $addr,	# item number
+		dg_item		=> $i,		# reference to object
+		dg_depends	=> {},		# items this depends upon
+		dg_blocks	=> {},		# items that depend upon this item
+		dg_active	=> 0,		# item has been returned by independent() but not unlocked or removed
+		dg_lock		=> 0,		# item is locked
+		dg_desc		=> undef,	# description
+		dg_stuck	=> undef,	# item is stuck, why it's stuck
 	);
 	return %item if wantarray;
-	lock_keys(%item);
-	return \%item;
+#	lock_keys(%item);     XXXX
+	return bless \%item, 'Object::Dependency::Item';
 }
 
 sub get_item
 {
 	my ($self, $addr) = @_;
-	return $self->{addrmap}{$addr};
+	return $self->{addrmap}{$addr} || $self->{stuck}{$addr};
 }
 
 sub get_addr
 {
 	my ($self, $item) = @_;
 	my $addr = refaddr($item) || $item;
-	die unless $self->{addrmap}{$addr};
+	die unless $self->{addrmap}{$addr} || $self->{stuck}{$addr};
 	return $addr;
 }
 
@@ -63,9 +64,8 @@ sub unlock
 {
 	my ($self, $item) = @_;
 	my $da = refaddr($item) || $item;
-	my $dao = $self->{addrmap}{$da} or confess;
+	my $dao = $self->{addrmap}{$da} || $self->{stuck}{$da} or confess;
 	$dao->{dg_lock} = 0;
-	$dao->{dg_active} = 0;
 }
 
 sub add
@@ -74,20 +74,22 @@ sub add
 	for my $i ($item, @depends_upon) {
 		my $addr = refaddr($i) || $i;
 		next if $self->{addrmap}{$addr};
+		next if $self->{stuck}{$addr};
 		$self->{addrmap}{$addr} = $self->newitem($i);
 		$self->{independent}{$addr} = $self->{addrmap}{$addr};
 		printf STDERR "ADD ITEM %s\n", $self->desc($addr) if $debug;
 	};
 	my $da = refaddr($item) || $item;
-	my $dao = $self->{addrmap}{$da};
+	my $dao = $self->{addrmap}{$da} || $self->{stuck}{$da};
 	delete $self->{independent}{$da}
 		if @depends_upon;
 	for my $d (@depends_upon) {
 		my $addr = refaddr($d) || $d;
-		my $o = $self->{addrmap}{$addr};
+		my $o = $self->{addrmap}{$addr} || $self->{stuck}{$addr};
 		$o->{dg_blocks}{$da} = $dao;
-		$o->{dg_active} = 0;
 		$dao->{dg_depends}{$addr} = $o;
+		$self->stuck_dependency($da, "Stuck on " . $self->desc($o))
+			if $self->{stuck}{$addr};
 	}
 }
 
@@ -97,24 +99,25 @@ sub remove_all_dependencies
 	my (@remove);
 	for my $i (@items) {
 		my $addr = refaddr($i) || $i;
-		my $o = $self->{addrmap}{$addr};
+		my $o = $self->{addrmap}{$addr} || $self->{stuck}{$addr};
 		for my $ubi (keys %{$o->{dg_blocks}}) {
 			my $unblock = delete $o->{dg_blocks}{$ubi};
 			delete $unblock->{dg_depends}{$addr};
 			$self->remove_all_dependencies($unblock);
 			push(@remove, $unblock);
 			next if keys %{$unblock->{dg_depends}};
+			next if $unblock->{dg_stuck};
 			$self->{independent}{$unblock->{dg_addr}} = $unblock;
 		}
 	}
-	$self->remove_dependency(grep { $self->{addrmap}{refaddr($_) || $_} } uniq @remove);
+	$self->remove_dependency(grep { $self->{addrmap}{refaddr($_) || $_} || $self->{stuck}{refaddr($_) || $_} } uniq @remove);
 }
 
 sub is_dependency
 {
 	my ($self, $item) = @_;
 	my $addr = refaddr($item) || $item;
-	return defined $self->{addrmap}{$addr};
+	return defined($self->{addrmap}{$addr} || $self->{stuck}{$addr});
 }
 
 sub remove_dependency
@@ -127,8 +130,10 @@ sub remove_dependency
 			printf STDERR "REMOVE ITEM %s:%d: %s %s\n", $f, $l, $self->desc($addr), ($i->{desc} ? $i->{desc} : ($i->{trace} ? $i->{trace} : "$i"));
 		}
 		delete $self->{independent}{$addr};
-		confess unless defined $self->{addrmap}{$addr};
-		my $o = delete $self->{addrmap}{$addr};
+
+		# we won't complain about removing stuck dependencies
+		my $o = delete($self->{addrmap}{$addr}) || delete($self->{stuck}{$addr}) or confess;
+
 		if (keys %{$o->{dg_depends}}) {
 			printf STDERR "attempting to remove %s but it has dependencies that aren't met:\n", $self->desc($o);
 			for my $da (keys %{$o->{dg_depends}}) {
@@ -140,6 +145,7 @@ sub remove_dependency
 			delete $unblock->{dg_depends}{$addr};
 			$unblock->{dg_active} = 0;
 			next if keys %{$unblock->{dg_depends}};
+			next if $unblock->{dg_stuck};
 			$self->{independent}{$unblock->{dg_addr}} = $unblock;
 		}
 	}
@@ -149,9 +155,16 @@ sub stuck_dependency
 {
 	my ($self, $item, $problem) = @_;
 	my $addr = refaddr($item) || $item;
-	my $o = $self->{addrmap}{$addr};
+	my $o = $self->{addrmap}{$addr} || $self->{stuck}{$addr};
+	return if $o->{dg_stuck};
+	confess unless blessed $o;
 	$o->{dg_stuck} = $problem || sprintf("stuck called from %s line %d", (caller())[1,2]);
 	$self->{stuck}{$addr} = $o;
+	delete $self->{independent}{$addr};
+	delete $self->{addrmap}{$addr};
+	for my $also_stuck (keys %{$o->{dg_blocks}}) {
+		$self->stuck_dependency($also_stuck, "Stuck on " . $self->desc($addr));
+	}
 }
 
 sub independent
@@ -161,6 +174,7 @@ sub independent
 	my $count = $opts{count} || 0;
 	my $active = $opts{active} || 0;
 	my $lock = $opts{lock} || 0;
+	my $stuck = $opts{stuck} || 0;   # XXX
 
 	my @ind;
 	for my $o (values %{$self->{independent}}) {
@@ -193,7 +207,7 @@ sub desc
 		$o = $addr;
 		$addr = refaddr($addr) || $addr;
 	} else {
-		$o = $self->{addrmap}{$addr};
+		$o = $self->{addrmap}{$addr} || $self->{stuck}{$addr};
 	}
 	return "NO SUCH OBJECT $addr" unless $o;
 	my $node = $o->{dg_item};
@@ -234,12 +248,12 @@ sub dump_graph_string
 
 	my $r = sprintf "Dependency Graph, alldone=%d\n", $self->alldone;
 	my %desc;
-	for my $addr (sort keys %{$self->{addrmap}}) {
+	for my $addr (sort (keys %{$self->{addrmap}}, keys %{$self->{stuck}})) {
 		$desc{$addr} = $self->desc($addr);
 	}
-	for my $addr (sort keys %{$self->{addrmap}}) {
+	for my $addr (sort (keys %{$self->{addrmap}}, keys %{$self->{stuck}})) {
 		$r .= "\t$desc{$addr}\n";
-		my $node = $self->{addrmap}{$addr};
+		my $node = $self->{addrmap}{$addr} || $self->{stuck}{$addr};
 		for my $b (keys %{$node->{dg_blocks}}) {
 			$r .= "\t\tBLOCKS\t$desc{$b}\n";
 		}
@@ -250,7 +264,7 @@ sub dump_graph_string
 	return $r;
 }
 
-1;
+;
 
 __END__
 
@@ -269,10 +283,6 @@ Object::Dependency - maintain a dependency graph
  $graph->remove_dependency(@objects_that_are_no_longer_relevant)
 
  @objects_without_dependencies = $graph->independent;
-
- my $addr = $graph->get_addr($item);
-
- my $item = $graph->get_item($addr);
 
 =head1 DESCRIPTION
 
@@ -316,12 +326,14 @@ All objects dependent on C<@objects> will also be removed.
 Removes the C<@objects> from the dependency graph.  
 Dependencies upon
 these objects will be considered to be satisfied.
+Objects that had been dependent upon C<@objects> will no longer be
+dependent upon them.
 
 =item stuck_dependency($object, $description_of_problem)
 
 Mark that the C<$object> will never be removed from the dependency graph because
 there is some problem with it.   All objects that depend upon C<$object> will now
-be considered "stuck".
+be considered "stuck".  Behavior of removing a stuck dependency is not defined.
 
 =item independent(%opts)
 
@@ -338,15 +350,23 @@ Return at most COUNT items.
 
 =item active => 1
 
-Normally active objects are not included in the returned list.  With C<active => 1>, 
+Normally active objects are not included in the returned list.  With C<active =E<gt> 1>, 
 active objects are returned.
 
 =item lock => 1
 
-Normally locked objects are not included in the returned list.  With C<lock => 1>, 
-locked objects are returned.
+Locked objects are not included in the returned list.  With C<lock =E<gt> 1>, 
+objects are locked when they are returned.
+
+=item stuck => 1
+
+Normally items that have been marked as "stuck" are not returned.  With C<stuck =E<gt> 1>,
+stuck objects are returned.
 
 =back
+
+If the graph is not empty but there are no independent objects then there is a loop
+in the graph and C<independent()> will die.  Wrap it in an C<eval()> if you care.
 
 =item alldone()
 
